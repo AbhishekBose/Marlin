@@ -16,7 +16,7 @@ async def create_embeddings(request: EmbeddingRequest):
     try:
         # Generate embeddings
         start_time = time.time()
-        embeddings = model.encode([request.query])
+            embeddings = model.encode([request.query])
         print(f"Time taken for encoding: {round((time.time()-start_time)*1000,2)} ms")
         return {"embeddings": embeddings.tolist()}
     except Exception as e:
