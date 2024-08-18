@@ -17,6 +17,8 @@ use std::collections::HashSet;
 use tokenizers::Tokenizer;
 use candle_core::quantized::{ggml_file,gguf_file};
 
+static HF_TOKEN:&str = "PUT YOUR HF TOKEN HERE";
+
 pub struct GenerationModel {
     model: ModelWeights,
     tokenizer: Tokenizer,
@@ -25,25 +27,23 @@ pub struct GenerationModel {
 
 impl GenerationModel {
     pub fn new() -> Result<GenerationModel> {
-        //let base_repo_id = ("TheBloke/CodeLlama-7B-GGUF", "codellama-7b.Q4_0.gguf");
+    
         let base_repo_id = (
             "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
             "mistral-7b-instruct-v0.2.Q4_K_S.gguf",
         );
-        //let base_repo_id = ("MaziyarPanahi/gemma-2b-it-GGUF", "gemma-2b-it.Q4_K_M.gguf");
-        //let tokenizer_repo = "hf-internal-testing/llama-tokenizer";
+        /
         let tokenizer_repo = "mistralai/Mistral-7B-Instruct-v0.2";
-        //let tokenizer_repo = "google/gemma-2b-it";
-
-        let repo = Repo::new(base_repo_id.0.to_string(), RepoType::Model);
-        let api = Api::new()?;
-        let api = api.repo(repo);
-        let tokenizer_filename = get_tokenizer(&api);
-        let model_path = api.get(base_repo_id.1).expect("API error");
-
-        //let device = Device::Cpu;
+        
+        let model_repo = create_hub_repo(base_repo_id.0.to_string())?;
+        let model_path = model_repo.get(base_repo_id.1).expect("API error");
+        println!("Model path is {:?}",model_path);
+        let tokenizer_repo = create_hub_repo(tokenizer_repo.to_string())?;
+        let tokenizer_filename = get_tokenizer(&tokenizer_repo);
+        println!("Tokenizer filename is {:?}",tokenizer_filename);
+        
         let device = Device::Cpu;
-        // let mut tokenizer = Tokenizer::from_bytes(&tokenizer).map_anyhow_err()?;
+        
         let mut tokenizer = tokenizer_filename.map_err(E::msg)?;
         let mut file = std::fs::File::open(&model_path)?;
         let model_content = gguf_file::Content::read(&mut file)?;
@@ -55,6 +55,19 @@ impl GenerationModel {
             device,
         })
     }
+}
+
+
+pub fn create_hub_repo(repo_id:String) -> Result<ApiRepo> {
+    use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
+
+    let mut api_builder = ApiBuilder::new();
+
+    api_builder = api_builder.with_token(Some(HF_TOKEN.to_string()));
+    
+    let repo = Repo::new(repo_id, RepoType::Model);
+    let api = api_builder.build()?.repo(repo);
+    return Ok(api)
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,49 +92,6 @@ where
     }
 }
 
-fn hub_load_safetensors(
-    repo: &hf_hub::api::sync::ApiRepo,
-    json_file: &str,
-) -> Result<Vec<std::path::PathBuf>> {
-    let json_file = repo.get(json_file).map_err(candle_core::Error::wrap)?;
-    let json_file = std::fs::File::open(json_file)?;
-    let json: Weightmaps = serde_json::from_reader(&json_file).map_err(candle_core::Error::wrap)?;
-
-    let pathbufs: Vec<std::path::PathBuf> = json
-        .weight_map
-        .iter()
-        .map(|f| repo.get(f).unwrap())
-        .collect();
-
-    Ok(pathbufs)
-}
-
-/// Loads the safetensors files for a model from the hub based on a json index file.
-// pub fn hub_load_safetensors(
-//     repo: &hf_hub::api::sync::ApiRepo,
-//     json_file: &str,
-// ) -> Result<Vec<std::path::PathBuf>> {
-//     let json_file = repo.get(json_file).map_err(Error::wrap)?;
-//     let json_file = std::fs::File::open(json_file)?;
-//     let json: serde_json::Value =
-//         serde_json::from_reader(&json_file).map_err(Error::wrap)?;
-//     let weight_map = match json.get("weight_map") {
-//         None => candle_core::bail!("no weight map in {json_file:?}").into(),
-//         Some(serde_json::Value::Object(map)) => map,
-//         Some(_) => candle_core::bail!("weight map in {json_file:?} is not a map").into(),
-//     };
-//     let mut safetensors_files: HashSet<String> = std::collections::HashSet::new();
-//     for value in weight_map.values() {
-//         if let Some(file) = value.as_str() {
-//             safetensors_files.insert(file.to_string());
-//         }
-//     }
-//     let safetensors_files = safetensors_files
-//         .iter()
-//         .map(|v| repo.get(v).map_err(Error::wrap))
-//         .collect()?;
-//     Ok(safetensors_files)
-// }
 
 fn get_tokenizer(repo: &ApiRepo) -> Result<Tokenizer> {
     let tokenizer_filename = repo.get("tokenizer.json")?;
